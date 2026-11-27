@@ -17,6 +17,16 @@ const MODELS = [
   { id: 'freezer550', name: 'Freezer 550', msrp: 4999, tag: 'frozen' }
 ];
 
+const QUADRANT_BASE = {
+  1: { variety: 12, basket: 10, stock: 8, payment: 5 },
+  2: { variety: 7, basket: 5, stock: 5, payment: 3 },
+  3: { variety: 10, basket: 8, stock: 7, payment: 4 },
+  4: { variety: 4, basket: 3, stock: 3, payment: 2 }
+};
+
+const REVENUE_LINE = 1200;
+const URGENCY_HIGH_LINE = 50;
+
 const FREIGHT_FEE = 250;
 const PREMIUM_VENUES = ['hotel', 'hospital', 'transit', 'gym', 'office_premium'];
 
