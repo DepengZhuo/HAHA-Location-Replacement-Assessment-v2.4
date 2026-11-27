@@ -78,6 +78,11 @@ function compute(p) {
   const oldDailyOrders = oldMonthlyOrders / 30;
   const oldAov = oldMonthlyOrders > 0 ? oldSales / oldMonthlyOrders : 0;
 
+  // Growth recommendation quadrant: current monthly sales + Step 1 score.
+  const highRev = oldSales >= REVENUE_LINE;
+  const highUrg = urgencyTotal >= URGENCY_HIGH_LINE;
+  const quadrantId = highRev ? (highUrg ? 1 : 2) : (highUrg ? 3 : 4);
+
   const siteTerms = dealTerms(p.site.deal, p.site.share, p.site.rent);
   const oldSiteFee = oldSales * siteTerms.share / 100 + siteTerms.rent;
 
@@ -252,6 +257,7 @@ function compute(p) {
 
   return {
     hasData,
+    quadrantId,
     step1Complete,
     urgency: { total: urgencyTotal, hwPts, commercialPts, offensePts, defensePts, tier: urgencyTier, complete: step1Complete, diagAnswered, payAnswered, ageKnown },
     hiddenRepairRisk,
@@ -272,19 +278,43 @@ function compute(p) {
 }
 
 function syncUpliftBase(p, force) {
-  // Kept as a compatibility hook for older boot/event code. Growth is never
-  // inferred from urgency score or revenue quadrant. Only explicit user input
-  // changes uplift percentages.
-  if (!p || !p.uplift) return;
-  ['variety', 'basket', 'stock', 'payment'].forEach(k => {
-    if (!p.uplift[k]) p.uplift[k] = { accept: 'no', pct: 0, custom: false };
-    if (force) {
-      p.uplift[k].accept = 'no';
-      p.uplift[k].pct = 0;
-      p.uplift[k].custom = false;
-    }
+  if (!p || !p.uplift) return false;
+
+  const keys = ['variety', 'basket', 'stock', 'payment'];
+  const q = compute(p).quadrantId;
+
+  keys.forEach(k => {
+    if (!p.uplift[k]) p.uplift[k] = { accept: 'partial', pct: 0, custom: false };
   });
+
+  // Projects saved by the previous v2.4 zero-growth default are migrated to
+  // Tentative recommendations once. A real custom percentage is preserved.
+  const legacyZeroDefault = p.uplift.initialized && !Number(p.uplift._baseQ) &&
+    keys.every(k => p.uplift[k].accept === 'no' && num(p.uplift[k].pct) === 0 && !p.uplift[k].custom);
+  if (legacyZeroDefault) keys.forEach(k => { p.uplift[k].accept = 'partial'; });
+
+  const refresh = !!force || !p.uplift.initialized || Number(p.uplift._baseQ) !== q || legacyZeroDefault;
+
+  if (force) {
+    keys.forEach(k => {
+      p.uplift[k].accept = 'partial';
+      p.uplift[k].custom = false;
+    });
+  }
+
+  if (refresh || force) {
+    keys.forEach(k => {
+      const item = p.uplift[k];
+      if (!item.custom) {
+        const factor = item.accept === 'yes' ? 1 : item.accept === 'partial' ? 0.5 : 0;
+        item.pct = round1(QUADRANT_BASE[q][k] * factor);
+      }
+    });
+  }
+
+  p.uplift._baseQ = q;
   p.uplift.initialized = true;
+  return refresh || !!force;
 }
 
 /* Step completion is based on the current data, not on a "visited" flag.

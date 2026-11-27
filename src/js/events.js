@@ -80,15 +80,15 @@ document.addEventListener('click', e => {
       });
     }
 
-    /* Update uplift % input directly when acceptance changes */
+    /* Update uplift % from the selected agreement level and current quadrant. */
     if (/^uplift\.[a-z]+\.accept$/.test(path)) {
-      // Acceptance records the operator's stance only. The percentage remains
-      // zero until the user explicitly enters a quantified assumption.
       const k = path.split('.')[1];
-      if (val === 'no') {
-        p.uplift[k].pct = 0;
-        p.uplift[k].custom = false;
-      }
+      const q = compute(p).quadrantId;
+      const factor = val === 'yes' ? 1 : val === 'partial' ? 0.5 : 0;
+      p.uplift[k].pct = round1(QUADRANT_BASE[q][k] * factor);
+      p.uplift[k].custom = false;
+      p.uplift.initialized = true;
+      p.uplift._baseQ = q;
       const pctInp = $(`[data-bind="uplift.${k}.pct"]`);
       if (pctInp) pctInp.value = p.uplift[k].pct;
     }
@@ -187,7 +187,7 @@ document.addEventListener('click', e => {
         const inp = $(`[data-bind="uplift.${k}.pct"]`);
         if (inp) inp.value = p.uplift[k].pct;
         const grp = $(`[data-seg-group="uplift.${k}.accept"]`);
-        if (grp) $$('button', grp).forEach(btn => btn.classList.toggle('on', btn.dataset.value === 'no'));
+        if (grp) $$('button', grp).forEach(btn => btn.classList.toggle('on', btn.dataset.value === 'partial'));
       });
       saveState();
       syncOutputs();
@@ -246,6 +246,20 @@ document.addEventListener('input', e => {
   if (path === 'baseline.monthlyOrders') p.baseline.ordersEstimated = false;
   if (/^uplift\.[a-z]+\.pct$/.test(path)) {
     p.uplift[path.split('.')[1]].custom = true;
+  }
+
+  // If monthly sales crosses the $1,200 quadrant boundary, refresh all
+  // non-custom recommendations and keep the visible controls in sync.
+  if (path === 'baseline.monthlySales' && app.view === 'step2') {
+    const changed = syncUpliftBase(p, false);
+    if (changed) {
+      ['variety', 'basket', 'stock', 'payment'].forEach(k => {
+        const inp = $(`[data-bind="uplift.${k}.pct"]`);
+        if (inp) inp.value = p.uplift[k].pct;
+        const grp = $(`[data-seg-group="uplift.${k}.accept"]`);
+        if (grp) $$('button', grp).forEach(btn => btn.classList.toggle('on', btn.dataset.value === p.uplift[k].accept));
+      });
+    }
   }
   p.updatedAt = new Date().toISOString();
   saveState();
