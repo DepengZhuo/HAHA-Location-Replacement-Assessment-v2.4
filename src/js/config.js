@@ -73,14 +73,14 @@ function createBlankProject(locationName) {
       hahaShare: 10,
       hahaRent: 0
     },
-    uplift: {
-      initialized: false,
-      _baseQ: 0,
-      variety: { accept: 'no', pct: 0, custom: false },
-      basket:  { accept: 'no', pct: 0, custom: false },
-      stock:   { accept: 'no', pct: 0, custom: false },
-      payment: { accept: 'no', pct: 0, custom: false }
-    },
+uplift: {
+  initialized: false,
+  _baseQ: 0,
+  variety: { accept: 'partial', pct: 6, custom: false },
+  basket:  { accept: 'partial', pct: 5, custom: false },
+  stock:   { accept: 'partial', pct: 4, custom: false },
+  payment: { accept: 'partial', pct: 2.5, custom: false }
+},
     haha: {
       cogsRate: 45,
       processing: 5.95,
