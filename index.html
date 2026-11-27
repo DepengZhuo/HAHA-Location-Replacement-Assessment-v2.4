@@ -1433,6 +1433,17 @@ const MODELS = [
 const FREIGHT_FEE = 250;
 const PREMIUM_VENUES = ['hotel', 'hospital', 'transit', 'gym', 'office_premium'];
 
+// Client-Agreed Growth Uplift: full-agreement reference values by quadrant.
+// Tentative applies 50%; Yes applies 100%; No applies 0%.
+const QUADRANT_BASE = {
+  1: { variety: 12, basket: 10, stock: 8, payment: 5 },
+  2: { variety: 7, basket: 5, stock: 5, payment: 3 },
+  3: { variety: 10, basket: 8, stock: 7, payment: 4 },
+  4: { variety: 4, basket: 3, stock: 3, payment: 2 }
+};
+const REVENUE_LINE = 1200;
+const URGENCY_HIGH_LINE = 50;
+
 function createBlankProject(locationName) {
   return {
     id: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
@@ -1479,10 +1490,10 @@ function createBlankProject(locationName) {
     uplift: {
       initialized: false,
       _baseQ: 0,
-      variety: { accept: 'no', pct: 0, custom: false },
-      basket:  { accept: 'no', pct: 0, custom: false },
-      stock:   { accept: 'no', pct: 0, custom: false },
-      payment: { accept: 'no', pct: 0, custom: false }
+      variety: { accept: 'partial', pct: 0, custom: false },
+      basket:  { accept: 'partial', pct: 0, custom: false },
+      stock:   { accept: 'partial', pct: 0, custom: false },
+      payment: { accept: 'partial', pct: 0, custom: false }
     },
     haha: {
       cogsRate: 45,
@@ -2780,6 +2791,11 @@ function compute(p) {
   const oldDailyOrders = oldMonthlyOrders / 30;
   const oldAov = oldMonthlyOrders > 0 ? oldSales / oldMonthlyOrders : 0;
 
+  // Growth recommendation quadrant: current monthly sales + Step 1 score.
+  const highRev = oldSales >= REVENUE_LINE;
+  const highUrg = urgencyTotal >= URGENCY_HIGH_LINE;
+  const quadrantId = highRev ? (highUrg ? 1 : 2) : (highUrg ? 3 : 4);
+
   const siteTerms = dealTerms(p.site.deal, p.site.share, p.site.rent);
   const oldSiteFee = oldSales * siteTerms.share / 100 + siteTerms.rent;
 
@@ -2954,6 +2970,7 @@ function compute(p) {
 
   return {
     hasData,
+    quadrantId,
     step1Complete,
     urgency: { total: urgencyTotal, hwPts, commercialPts, offensePts, defensePts, tier: urgencyTier, complete: step1Complete, diagAnswered, payAnswered, ageKnown },
     hiddenRepairRisk,
@@ -2974,19 +2991,43 @@ function compute(p) {
 }
 
 function syncUpliftBase(p, force) {
-  // Kept as a compatibility hook for older boot/event code. Growth is never
-  // inferred from urgency score or revenue quadrant. Only explicit user input
-  // changes uplift percentages.
-  if (!p || !p.uplift) return;
-  ['variety', 'basket', 'stock', 'payment'].forEach(k => {
-    if (!p.uplift[k]) p.uplift[k] = { accept: 'no', pct: 0, custom: false };
-    if (force) {
-      p.uplift[k].accept = 'no';
-      p.uplift[k].pct = 0;
-      p.uplift[k].custom = false;
-    }
+  if (!p || !p.uplift) return false;
+
+  const keys = ['variety', 'basket', 'stock', 'payment'];
+  const q = compute(p).quadrantId;
+
+  keys.forEach(k => {
+    if (!p.uplift[k]) p.uplift[k] = { accept: 'partial', pct: 0, custom: false };
   });
+
+  // Projects saved by the previous v2.4 zero-growth default are migrated to
+  // Tentative recommendations once. A real custom percentage is preserved.
+  const legacyZeroDefault = p.uplift.initialized && !Number(p.uplift._baseQ) &&
+    keys.every(k => p.uplift[k].accept === 'no' && num(p.uplift[k].pct) === 0 && !p.uplift[k].custom);
+  if (legacyZeroDefault) keys.forEach(k => { p.uplift[k].accept = 'partial'; });
+
+  const refresh = !!force || !p.uplift.initialized || Number(p.uplift._baseQ) !== q || legacyZeroDefault;
+
+  if (force) {
+    keys.forEach(k => {
+      p.uplift[k].accept = 'partial';
+      p.uplift[k].custom = false;
+    });
+  }
+
+  if (refresh || force) {
+    keys.forEach(k => {
+      const item = p.uplift[k];
+      if (!item.custom) {
+        const factor = item.accept === 'yes' ? 1 : item.accept === 'partial' ? 0.5 : 0;
+        item.pct = round1(QUADRANT_BASE[q][k] * factor);
+      }
+    });
+  }
+
+  p.uplift._baseQ = q;
   p.uplift.initialized = true;
+  return refresh || !!force;
 }
 
 /* Step completion is based on the current data, not on a "visited" flag.
@@ -4560,15 +4601,15 @@ document.addEventListener('click', e => {
       });
     }
 
-    /* Update uplift % input directly when acceptance changes */
+    /* Update uplift % from the selected agreement level and current quadrant. */
     if (/^uplift\.[a-z]+\.accept$/.test(path)) {
-      // Acceptance records the operator's stance only. The percentage remains
-      // zero until the user explicitly enters a quantified assumption.
       const k = path.split('.')[1];
-      if (val === 'no') {
-        p.uplift[k].pct = 0;
-        p.uplift[k].custom = false;
-      }
+      const q = compute(p).quadrantId;
+      const factor = val === 'yes' ? 1 : val === 'partial' ? 0.5 : 0;
+      p.uplift[k].pct = round1(QUADRANT_BASE[q][k] * factor);
+      p.uplift[k].custom = false;
+      p.uplift.initialized = true;
+      p.uplift._baseQ = q;
       const pctInp = $(`[data-bind="uplift.${k}.pct"]`);
       if (pctInp) pctInp.value = p.uplift[k].pct;
     }
@@ -4667,7 +4708,7 @@ document.addEventListener('click', e => {
         const inp = $(`[data-bind="uplift.${k}.pct"]`);
         if (inp) inp.value = p.uplift[k].pct;
         const grp = $(`[data-seg-group="uplift.${k}.accept"]`);
-        if (grp) $$('button', grp).forEach(btn => btn.classList.toggle('on', btn.dataset.value === 'no'));
+        if (grp) $$('button', grp).forEach(btn => btn.classList.toggle('on', btn.dataset.value === 'partial'));
       });
       saveState();
       syncOutputs();
@@ -4726,6 +4767,20 @@ document.addEventListener('input', e => {
   if (path === 'baseline.monthlyOrders') p.baseline.ordersEstimated = false;
   if (/^uplift\.[a-z]+\.pct$/.test(path)) {
     p.uplift[path.split('.')[1]].custom = true;
+  }
+
+  // If monthly sales crosses the $1,200 quadrant boundary, refresh all
+  // non-custom recommendations and keep the visible controls in sync.
+  if (path === 'baseline.monthlySales' && app.view === 'step2') {
+    const changed = syncUpliftBase(p, false);
+    if (changed) {
+      ['variety', 'basket', 'stock', 'payment'].forEach(k => {
+        const inp = $(`[data-bind="uplift.${k}.pct"]`);
+        if (inp) inp.value = p.uplift[k].pct;
+        const grp = $(`[data-seg-group="uplift.${k}.accept"]`);
+        if (grp) $$('button', grp).forEach(btn => btn.classList.toggle('on', btn.dataset.value === p.uplift[k].accept));
+      });
+    }
   }
   p.updatedAt = new Date().toISOString();
   saveState();

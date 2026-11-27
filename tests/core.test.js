@@ -31,14 +31,36 @@ function validProject() {
   return p;
 }
 
-test('new projects assume zero growth until percentages are entered', () => {
+test('new projects initialize tentative growth recommendations at 50%', () => {
   const p = validProject();
+  context.syncUpliftBase(p, false);
   const m = context.compute(p);
-  assert.equal(m.growth.totalRevenueGrowthPct, 0);
-  assert.equal(m.haha.sales, m.old.sales);
   assert.deepEqual(
     ['variety', 'basket', 'stock', 'payment'].map(k => p.uplift[k].pct),
-    [0, 0, 0, 0]
+    [3.5, 2.5, 2.5, 1.5]
+  );
+  assert.deepEqual(
+    ['variety', 'basket', 'stock', 'payment'].map(k => p.uplift[k].accept),
+    ['partial', 'partial', 'partial', 'partial']
+  );
+  assert.equal(m.growth.totalRevenueGrowthPct, 10.1875);
+});
+
+test('legacy zero-growth projects migrate to tentative recommendations', () => {
+  const p = validProject();
+  p.uplift.initialized = true;
+  p.uplift._baseQ = 0;
+  for (const key of ['variety', 'basket', 'stock', 'payment']) {
+    p.uplift[key] = { accept: 'no', pct: 0, custom: false };
+  }
+  context.syncUpliftBase(p, false);
+  assert.deepEqual(
+    ['variety', 'basket', 'stock', 'payment'].map(k => p.uplift[k].pct),
+    [3.5, 2.5, 2.5, 1.5]
+  );
+  assert.deepEqual(
+    ['variety', 'basket', 'stock', 'payment'].map(k => p.uplift[k].accept),
+    ['partial', 'partial', 'partial', 'partial']
   );
 });
 
@@ -100,7 +122,7 @@ test('negative machine age cannot complete Step 01', () => {
   assert.equal(context.compute(p).step1Complete, false);
 });
 
-test('resetting growth assumptions returns all drivers to zero and not agreed', () => {
+test('resetting growth assumptions restores tentative 50% recommendations', () => {
   const p = validProject();
   for (const key of ['variety', 'basket', 'stock', 'payment']) {
     p.uplift[key].pct = 12;
@@ -108,9 +130,11 @@ test('resetting growth assumptions returns all drivers to zero and not agreed', 
     p.uplift[key].custom = true;
   }
   context.syncUpliftBase(p, true);
-  for (const key of ['variety', 'basket', 'stock', 'payment']) {
-    assert.equal(p.uplift[key].pct, 0);
-    assert.equal(p.uplift[key].accept, 'no');
+  for (const [key, expected] of Object.entries({
+    variety: 3.5, basket: 2.5, stock: 2.5, payment: 1.5
+  })) {
+    assert.equal(p.uplift[key].pct, expected);
+    assert.equal(p.uplift[key].accept, 'partial');
     assert.equal(p.uplift[key].custom, false);
   }
 });
